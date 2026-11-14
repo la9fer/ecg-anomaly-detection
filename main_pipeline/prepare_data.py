@@ -120,17 +120,6 @@ X_train, y_train = [], []
 X_val, y_val = [], []
 X_test, y_test = [], []
 
-for name, labels in [
-    ("Train", y_train),
-    ("Validation", y_val),
-    ("Test", y_test),
-]:
-    print(
-        f"{name}: {len(labels)} beats | "
-        f"Normal: {np.sum(labels == 0)} | "
-        f"Abnormal: {np.sum(labels == 1)}"
-    )
-
 for record in records:
     signal, _ = wfdb.rdsamp(os.path.join(DATASET_PATH, record))
     annotation = wfdb.rdann(os.path.join(DATASET_PATH, record), "atr")
@@ -158,10 +147,23 @@ for record in records:
 
 X_train = np.array(X_train, dtype=np.float32)
 y_train = np.array(y_train, dtype=np.int32)
+
 X_val = np.array(X_val, dtype=np.float32)
 y_val = np.array(y_val, dtype=np.int32)
+
 X_test = np.array(X_test, dtype=np.float32)
 y_test = np.array(y_test, dtype=np.int32)
+
+for name, labels in [
+    ("Train", y_train),
+    ("Validation", y_val),
+    ("Test", y_test),
+]:
+    print(
+        f"{name}: {len(labels)} beats | "
+        f"Normal: {np.sum(labels == 0)} | "
+        f"Abnormal: {np.sum(labels == 1)}"
+    )
 
 if len(X_train) == 0 or len(X_val) == 0 or len(X_test) == 0:
     raise RuntimeError("Empty split detected. Check dataset and label mapping.")

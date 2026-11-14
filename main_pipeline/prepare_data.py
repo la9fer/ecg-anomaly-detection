@@ -7,7 +7,6 @@ from scipy.signal import butter, filtfilt
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-
 def resolve_dataset_path(raw: str) -> str:
     candidates = []
     if os.path.isabs(raw):
@@ -24,7 +23,6 @@ def resolve_dataset_path(raw: str) -> str:
         "Dataset folder not found. Tried: " + ", ".join(os.path.abspath(c) for c in candidates)
     )
 
-
 DATASET_PATH = resolve_dataset_path(os.environ.get("DATASET_PATH", "mitdb"))
 WINDOW_SIZE = 180
 FS = 360  # MIT-BIH sampling rate
@@ -33,17 +31,14 @@ SEED = 42
 NORMAL = {"N"}
 ABNORMAL = {"V", "A", "L", "R", "F", "E"}
 
-
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
-
 
 def bandpass(signal, fs=FS, low=0.5, high=40.0, order=3):
     nyq = fs / 2
     b, a = butter(order, [low / nyq, high / nyq], btype="band")
     return filtfilt(b, a, signal)
-
 
 def safe_normalize(x, mean, std):
     if not np.isfinite(std) or std == 0:
@@ -52,28 +47,62 @@ def safe_normalize(x, mean, std):
     x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
     return x
 
+def get_subject_group(record):
+    """
+    MIT-BIH has 48 records from 47 subjects.
+    Records 201 and 202 belong to the same subject.
+    """
+    if record in {"201", "202"}:
+        return "subject_201_202"
+    return f"subject_{record}"
 
-def split_records_patient_wise(records):
-    records = sorted(records)
+def split_records_subject_wise(records):
+    records = sorted(set(records))
+
+    # Group recordings belonging to the same subject.
+    subject_records = {}
+    for record in records:
+        subject = get_subject_group(record)
+        subject_records.setdefault(subject, []).append(record)
+
+    subjects = sorted(subject_records)
+    if len(subjects) < 3:
+        raise ValueError("At least 3 subject groups are required.")
+
     rng = np.random.default_rng(SEED)
-    rng.shuffle(records)
+    rng.shuffle(subjects)
 
-    n = len(records)
-    n_train = max(1, int(0.7 * n))
+    n = len(subjects)
+    n_train = max(1, int(0.70 * n))
     n_val = max(1, int(0.15 * n))
+
     if n_train + n_val >= n:
-        n_val = 1
-        n_train = max(1, n - 2)
-    n_test = n - n_train - n_val
-    if n_test < 1:
-        n_test = 1
-        n_train = max(1, n_train - 1)
+        raise ValueError("Not enough subject groups for train/val/test.")
 
-    train_records = set(records[:n_train])
-    val_records = set(records[n_train : n_train + n_val])
-    test_records = set(records[n_train + n_val :])
+    train_subjects = subjects[:n_train]
+    val_subjects = subjects[n_train:n_train + n_val]
+    test_subjects = subjects[n_train + n_val:]
+
+    train_records = {
+        r for s in train_subjects for r in subject_records[s]
+    }
+    val_records = {
+        r for s in val_subjects for r in subject_records[s]
+    }
+    test_records = {
+        r for s in test_subjects for r in subject_records[s]
+    }
+
+    # Explicitly verify no subject appears in multiple partitions.
+    train_groups = {get_subject_group(r) for r in train_records}
+    val_groups = {get_subject_group(r) for r in val_records}
+    test_groups = {get_subject_group(r) for r in test_records}
+
+    assert train_groups.isdisjoint(val_groups)
+    assert train_groups.isdisjoint(test_groups)
+    assert val_groups.isdisjoint(test_groups)
+
     return train_records, val_records, test_records
-
 
 set_seed(SEED)
 
@@ -82,7 +111,7 @@ records = sorted(list(set(records)))
 if not records:
     raise RuntimeError("No MIT-BIH records found (.dat files missing).")
 
-train_records, val_records, test_records = split_records_patient_wise(records)
+train_records, val_records, test_records = split_records_subject_wise(records)
 print(
     f"Records split -> train: {len(train_records)} | val: {len(val_records)} | test: {len(test_records)}"
 )
@@ -90,6 +119,17 @@ print(
 X_train, y_train = [], []
 X_val, y_val = [], []
 X_test, y_test = [], []
+
+for name, labels in [
+    ("Train", y_train),
+    ("Validation", y_val),
+    ("Test", y_test),
+]:
+    print(
+        f"{name}: {len(labels)} beats | "
+        f"Normal: {np.sum(labels == 0)} | "
+        f"Abnormal: {np.sum(labels == 1)}"
+    )
 
 for record in records:
     signal, _ = wfdb.rdsamp(os.path.join(DATASET_PATH, record))

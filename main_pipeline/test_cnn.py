@@ -7,6 +7,9 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     roc_auc_score,
+    balanced_accuracy_score,
+    average_precision_score,
+    matthews_corrcoef,
 )
 
 model = tf.keras.models.load_model("models/ecg_cnn.keras")
@@ -27,7 +30,36 @@ try:
     auc = roc_auc_score(y_test, y_prob)
 except ValueError:
     auc = float("nan")
-cm = confusion_matrix(y_test, y_pred)
+    
+cm = confusion_matrix(
+    y_test,
+    y_pred,
+    labels=[0, 1]
+)
+
+# Additional evaluation metrics
+tn, fp, fn, tp = cm.ravel()
+
+specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+
+pr_auc = (
+    average_precision_score(y_test, y_prob)
+    if len(np.unique(y_test)) == 2
+    else float("nan")
+)
+
+balanced_acc = (
+    balanced_accuracy_score(y_test, y_pred)
+    if len(np.unique(y_test)) == 2
+    else float("nan")
+)
+
+mcc = matthews_corrcoef(y_test, y_pred)
+
+print("Specificity:", specificity)
+print("PR-AUC:", pr_auc)
+print("Balanced Accuracy:", balanced_acc)
+print("MCC:", mcc)
 
 print("Loss:", float(metrics[0]))
 print("Accuracy:", float(acc))

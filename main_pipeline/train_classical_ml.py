@@ -1,4 +1,3 @@
-
 import os
 import json
 import random
@@ -22,11 +21,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-
-# --------------------------------------------------
 # Configuration
-# --------------------------------------------------
-
 SEED = 42
 
 USE_SMOTE = False
@@ -37,20 +32,12 @@ SVM_MAX_SAMPLES = int(
     os.environ.get("SVM_MAX_SAMPLES", "10000")
 )
 
-
-# --------------------------------------------------
 # Reproducibility
-# --------------------------------------------------
-
 def set_seed(seed=SEED):
     random.seed(seed)
     np.random.seed(seed)
 
-
-# --------------------------------------------------
 # Feature extraction
-# --------------------------------------------------
-
 def extract_features(x_360):
     """
     Extract five simple statistical and peak-location
@@ -92,7 +79,6 @@ def extract_features(x_360):
         dtype=np.float32,
     )
 
-
 def build_feature_matrix(X):
     """
     Convert a collection of ECG beats into a feature matrix.
@@ -109,11 +95,7 @@ def build_feature_matrix(X):
         [extract_features(beat) for beat in X]
     )
 
-
-# --------------------------------------------------
 # Optional SMOTE
-# --------------------------------------------------
-
 def maybe_smote(X, y):
     """
     Apply SMOTE only to the training data, if enabled.
@@ -133,11 +115,7 @@ def maybe_smote(X, y):
 
     return smote.fit_resample(X, y)
 
-
-# --------------------------------------------------
 # Validation metrics
-# --------------------------------------------------
-
 def get_positive_probabilities(model, X):
     """
     Return probabilities corresponding specifically to label 1.
@@ -193,11 +171,7 @@ def calculate_metrics(y_true, y_pred, y_prob):
         ),
     }
 
-
-# --------------------------------------------------
 # Model construction
-# --------------------------------------------------
-
 def build_models(use_pca):
     """
     Build SVM, Random Forest and Logistic Regression pipelines.
@@ -262,11 +236,7 @@ def build_models(use_pca):
 
     return models
 
-
-# --------------------------------------------------
 # Training and validation
-# --------------------------------------------------
-
 def main():
 
     set_seed()
@@ -319,7 +289,7 @@ def main():
             "PCA_COMPONENTS cannot exceed the number of features."
         )
 
-    # Optional SMOTE: training data only.
+    # Optional SMOTE: training data only
     Xtr, ytr = maybe_smote(Xtr, y_train)
 
     print("\nTraining after optional resampling:", len(ytr))
@@ -327,7 +297,7 @@ def main():
     validation_results = []
     selected_models = {}
 
-    # Train all configurations.
+    # Train all configurations
     for use_pca in APPLY_PCA:
 
         config_name = "with_PCA" if use_pca else "without_PCA"
@@ -345,8 +315,8 @@ def main():
             X_fit = Xtr
             y_fit = ytr
 
-            # Limit SVM training size for computational efficiency.
-            # This sampling is performed only on training data.
+            # Limit SVM training size for computational efficiency
+            # This sampling is performed only on training data
             if (
                 model_name == "SVM"
                 and len(Xtr) > SVM_MAX_SAMPLES
@@ -366,7 +336,7 @@ def main():
 
             model.fit(X_fit, y_fit)
 
-            # Validation predictions.
+            # Validation predictions
             y_pred = model.predict(Xv)
             y_prob = get_positive_probabilities(model, Xv)
 
@@ -381,7 +351,7 @@ def main():
             for metric_name, value in metrics.items():
                 print(f"{metric_name}: {value:.4f}")
 
-            # Save fitted candidate model.
+            # Save fitted candidate model
             filename = f"{model_name}_{config_name}.joblib"
 
             model_path = os.path.join("models", filename)
@@ -398,7 +368,7 @@ def main():
             validation_results.append(result)
 
             # Select the best configuration for each model family
-            # using validation PR-AUC.
+            # using validation PR-AUC
             previous = selected_models.get(model_name)
 
             if (
@@ -407,7 +377,7 @@ def main():
             ):
                 selected_models[model_name] = result
 
-    # Save all validation results.
+    # Save all validation results
     with open(
         "models/classical_validation_results.json",
         "w",
@@ -418,7 +388,7 @@ def main():
             indent=4,
         )
 
-    # Save the selected configuration for each model family.
+    # Save the selected configuration for each model family
     with open(
         "models/selected_classical_models.json",
         "w",
@@ -441,9 +411,7 @@ def main():
             f"{result['metrics']['pr_auc']:.4f})"
         )
 
-    print("\nTraining and validation completed.")
-    print("Models saved in the models/ directory.")
-
-
+    print("\nTraining and validation completed")
+    print("Models saved in the models/ directory")
 if __name__ == "__main__":
     main()

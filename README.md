@@ -1,321 +1,345 @@
-# ECG Arrhythmia Detection | Deep Learning, Classical ML & Hardware Integration
+# ECG Arrhythmia Detection using Deep Learning and Classical Machine Learning
 
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
-![TensorFlow](https://img.shields.io/badge/TensorFlow-Keras-FF6F00?logo=tensorflow&logoColor=white)
-![Scikit Learn](https://img.shields.io/badge/Scikit--learn-ML-F7931E?logo=scikitlearn&logoColor=white)
-![Signal Processing](https://img.shields.io/badge/Signal%20Processing-ECG-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
+A comparative machine learning project for binary ECG beat classification using the **MIT-BIH Arrhythmia Database**. This project explores ECG signal preprocessing, statistical feature engineering, one-dimensional convolutional neural networks (1D CNNs), and classical machine learning classifiers.
 
-A computational ECG arrhythmia classification pipeline combining **1D Convolutional Neural Networks, classical machine learning baselines, biomedical signal processing and ESP32-based serial-stream inference**.
+## Overview
 
-The project explores how deep learning and handcrafted signal features compare when classifying annotated ECG beats as normal or abnormal, using the MIT-BIH Arrhythmia Database.
+Electrocardiogram (ECG) signals represent the electrical activity of the heart and provide valuable information about cardiac rhythm.
 
----
+This project investigates automated ECG beat classification through two complementary approaches:
 
-## 1. Project Overview
+- **Deep Learning:** A one-dimensional Convolutional Neural Network (1D CNN) trained directly on ECG beat segments.
+- **Classical Machine Learning:** Support Vector Machine (SVM), Random Forest, and Logistic Regression trained on engineered signal features.
 
-Electrocardiograms (ECGs) capture the electrical activity of the heart. Detecting abnormal cardiac rhythms from ECG signals is an important problem in biomedical signal processing and machine learning.
+The task is formulated as binary classification:
 
-This project implements an end-to-end experimental pipeline covering:
+- **Normal:** N
+- **Abnormal:** V, A, L, R, F, E
 
-- ECG signal preprocessing and beat segmentation.
-- Binary classification of normal and selected abnormal beat annotations.
-- 1D CNN training and evaluation.
-- Comparison against SVM, Random Forest and Logistic Regression.
-- Model evaluation using accuracy, precision, recall, F1 and ROC-AUC.
-- ESP32/ADS1293-connected streaming inference with host-side Python prediction.
+The selected non-normal annotation categories are grouped into a single abnormal class.
 
-**Objective:** Explore the trade-offs between automatically learned temporal features and manually engineered statistical features for ECG beat classification.
+> This is an experimental machine learning project for educational and research purposes. It is not a clinically validated diagnostic system.
 
-## 2. System Architecture
+## Dataset
 
-```mermaid
-flowchart TD
-    A["MIT-BIH ECG Database"] --> B["Signal Loading & Annotations"]
-    B --> C["Bandpass Filtering"]
-    C --> D["Beat Segmentation"]
-    D --> E["Normal / Abnormal Labels"]
-    E --> F["Train / Validation / Test Split"]
-    F --> G["Training Normalization"]
-    G --> H["1D CNN"]
-    G --> I["Handcrafted Feature Extraction"]
-    I --> J["SVM / Random Forest / Logistic Regression"]
-    H --> K["Model Evaluation"]
-    J --> K
-    K --> L["Performance Comparison"]
-    M["ADS1293 + ESP32"] --> N["Serial ECG Stream"]
-    N --> O["Python Streaming Inference"]
-    O --> P["Classification & Alert Simulation"]
-```
+**MIT-BIH Arrhythmia Database**
 
-The training and evaluation pipeline is separate from the hardware-connected streaming inference prototype.
+- Source: [PhysioNet – MIT-BIH Arrhythmia Database](https://physionet.org/content/mitdb/)
+- Number of recordings: 48
+- Number of subjects: 47
+- Sampling frequency: 360 Hz
+- Signal channel: First ECG channel
+- Beat window: 360 samples
+- Window duration: 1 second
 
-## 3. Dataset & Preprocessing
+Each ECG beat is extracted around its annotated location using:
 
-**Dataset:** [MIT-BIH Arrhythmia Database — PhysioNet](https://physionet.org/content/mitdb/1.0.0/)
+- 180 samples before the annotation
+- 180 samples after the annotation
 
-The database contains 48 approximately half-hour, two-channel ECG recordings from 47 subjects, sampled at 360 Hz per channel.
+Annotations outside the selected categories are excluded. Beats without a complete 360-sample window are also discarded.
 
-### Signal preprocessing
+### Binary label mapping
 
-The implemented preprocessing pipeline performs:
+| Annotation | Class |
+|---|---|
+| N | Normal (0) |
+| V | Abnormal (1) |
+| A | Abnormal (1) |
+| L | Abnormal (1) |
+| R | Abnormal (1) |
+| F | Abnormal (1) |
+| E | Abnormal (1) |
 
-1. **Signal loading:** ECG recordings and beat annotations are loaded using WFDB.
-2. **Channel selection:** The first ECG signal channel is used.
-3. **Bandpass filtering:** Third-order Butterworth bandpass filter with cutoffs at 0.5–40 Hz, applied using forward-backward filtering.
-4. **Beat segmentation:** A 360-sample window is extracted around each selected annotated beat, consisting of 180 samples before and 180 samples after the annotation.
-5. **Binary labelling:**
-   - Normal: `N`
-   - Abnormal: `V`, `A`, `L`, `R`, `F`, `E`
-   - Other annotation symbols are excluded.
-6. **Normalization:** Global mean and standard deviation are calculated from the training beats and reused for validation and test data.
+This is a selected binary classification scheme, not an exhaustive representation of every annotation category in MIT-BIH.
 
-### Data partitioning
+## Methodology
 
-The current implementation uses a seeded, randomized **record-level split**:
+### 1. ECG signal preprocessing
 
-| Partition | Approximate proportion |
-|---|---:|
-| Training | 70% |
-| Validation | 15% |
-| Testing | Remaining records |
+The preprocessing pipeline consists of:
 
-Random seed: `42`
+1. Loading ECG recordings and annotations using WFDB.
+2. Extracting the first ECG signal channel.
+3. Applying a third-order Butterworth bandpass filter between 0.5 Hz and 40 Hz.
+4. Extracting fixed-length beat windows around annotated locations.
+5. Mapping selected annotation categories to binary labels.
+6. Normalizing signals using statistics calculated exclusively from the training partition.
 
-**Evaluation caveat:** The current implementation partitions recording IDs, not explicitly grouped subject IDs. Therefore, subject-independent evaluation is not guaranteed. This is especially relevant because MIT-BIH contains two recordings (201 and 202) from the same subject. The reported metrics should be treated as preliminary record-level results, not as verified subject-independent performance.
+The normalization transformation is:
 
-## 4. Deep Learning Model — 1D CNN
+\[
+x_{\mathrm{norm}} =
+\frac{x-\mu_{\mathrm{train}}}{\sigma_{\mathrm{train}}}
+\]
 
-A one-dimensional convolutional neural network is implemented using TensorFlow/Keras.
+where the mean and standard deviation are calculated from training data and reused for validation and test data.
 
-### Architecture
+### 2. Subject-wise data partitioning
+
+The recordings are divided into three partitions:
+
+- Training: approximately 70%
+- Validation: approximately 15%
+- Test: approximately 15%
+
+The split is performed at the subject-group level rather than randomly splitting individual beats.
+
+MIT-BIH contains 48 recordings from 47 subjects. Records 201 and 202 are grouped together because they belong to the same subject.
+
+This reduces the risk of recordings from the same subject appearing in different partitions.
+
+### Dataset distribution
+
+The following counts were obtained during the preprocessing run:
+
+| Partition | Total beats | Normal | Abnormal |
+|---|---:|---:|---:|
+| Training | 73,404 | 53,064 | 20,340 |
+| Validation | 12,473 | 10,169 | 2,304 |
+| Test | 15,043 | 11,778 | 3,265 |
+| **Total** | **100,920** | **75,011** | **25,909** |
+
+The partitions are subject-wise, not beat-wise stratified. Consequently, their class proportions differ.
+
+## Model Architectures
+
+### 1. Convolutional Neural Network (CNN)
+
+A 1D CNN is trained directly on the preprocessed ECG beat segments.
+
+The architecture consists of:
 
 | Layer | Configuration |
 |---|---|
 | Input | 360 × 1 |
-| Conv Block 1 | 32 filters, kernel size 7 |
-| Conv Block 2 | 64 filters, kernel size 5 |
-| Conv Block 3 | 128 filters, kernel size 3 |
-| Each Conv Block | Conv1D → BatchNorm → ReLU → MaxPooling |
-| Global Pooling | Global Average Pooling |
+| Convolutional block 1 | 32 filters, kernel size 7 |
+| Convolutional block 2 | 64 filters, kernel size 5 |
+| Convolutional block 3 | 128 filters, kernel size 3 |
+| Convolutional blocks | Batch Normalization, ReLU and Max Pooling |
+| Global pooling | Global Average Pooling |
 | Regularization | Dropout (0.25) |
-| Dense Layer | 64 neurons, ReLU |
-| Output | 1 neuron, Sigmoid |
+| Dense layer | 64 units, ReLU, L2 regularization |
+| Output | Single sigmoid neuron |
 
-Additional training configuration:
+**Training configuration:**
 
 - Optimizer: Adam
-- Learning rate: 0.001
-- Loss: Binary Cross-Entropy
-- Optional class weighting
-- Early stopping based on validation accuracy
+- Initial learning rate: 0.001
+- Loss function: Binary cross-entropy
+- Batch size: 128
+- Maximum epochs: 20
+- Random seed: 42
+
+Training uses:
+
+- Early stopping
 - Model checkpointing
-- Learning-rate reduction on validation-loss plateau
+- Learning-rate reduction on plateau
 
-The network learns temporal representations directly from the segmented ECG waveform rather than relying exclusively on manually selected features.
+The best checkpoint is selected using validation PR-AUC.
 
-## 5. Classical Machine Learning Baselines
+### 2. Classical machine learning
 
-To compare learned representations against handcrafted features, three classical classifiers are implemented.
+Five statistical and signal-derived features are extracted from each ECG beat:
 
-### Feature extraction
+1. Mean amplitude
+2. Standard deviation
+3. Peak amplitude
+4. Signal energy
+5. Peak-distance proxy
 
-Five features are extracted from each 360-sample beat:
+The peak-distance feature is a heuristic calculated from the locations of maximum positive amplitudes in the two halves of a beat. It is not a true physiological RR interval.
 
-| Feature | Description |
-|---|---|
-| Mean | Average signal amplitude |
-| Standard deviation | Signal amplitude variation |
-| Peak amplitude | Maximum absolute amplitude |
-| Energy | Mean squared signal amplitude |
-| RR proxy | Distance between selected peaks in the two window halves |
+The following classifiers are evaluated:
 
-The final feature is a heuristic peak-distance proxy, not a clinically validated RR-interval measurement.
-
-### Models
-
-- Support Vector Machine (RBF kernel)
-- Random Forest (300 estimators)
+- Support Vector Machine with an RBF kernel
+- Random Forest with 300 estimators
 - Logistic Regression
 
-The implementation also supports:
+Each classifier is evaluated with and without Principal Component Analysis (PCA).
 
-- StandardScaler preprocessing.
-- Optional PCA (configured for five components).
-- Optional SMOTE (disabled by default).
-- Stratified subsampling for SVM training when the sample count exceeds the configured limit.
+Feature scaling and PCA are implemented using scikit-learn pipelines, ensuring that transformations are fitted on training data only.
 
-The PCA-enabled variants are included in the experimental comparison. Since the current configuration uses five input features and five PCA components, this setting should not be interpreted as a guaranteed dimensionality reduction.
+Class weighting is used to account for class imbalance. SMOTE is disabled by default.
 
-## 6. Previously Reported Experimental Results
+For computational efficiency, SVM training is limited to 10,000 training samples when the available training partition is larger.
 
-The following metrics are recorded in the repository's committed `main_pipeline/final_comparison.md`.
+The best configuration within each classifier family is selected using validation PR-AUC.
 
-| Model | Accuracy | Precision | Recall | F1 |
-|---|---:|---:|---:|---:|
-| CNN | 99.44% | 90.91% | 100.00% | 95.24% |
-| Random Forest | 97.78% | 100.00% | 60.00% | 75.00% |
-| Random Forest + PCA | 97.78% | 87.50% | 70.00% | 77.78% |
-| SVM | 97.78% | 80.00% | 80.00% | 80.00% |
-| SVM + PCA | 97.78% | 80.00% | 80.00% | 80.00% |
-| Logistic Regression | 95.56% | 55.56% | 100.00% | 71.43% |
-| Logistic Regression + PCA | 95.56% | 55.56% | 100.00% | 71.43% |
+## Experimental Results
 
-These are previously recorded results, not independently reproduced results from this README update. The detailed original run logs and test-set sample counts are not currently available for verification.
+Experiments were executed using Google Colab.
 
-### Observations
+### CNN training
 
-- The CNN has the highest reported accuracy and F1 score.
-- Random Forest has the highest precision among the non-PCA classical baselines.
-- SVM provides a more balanced precision-recall result among the classical models.
-- Logistic Regression achieves high recall in the reported comparison but has lower precision.
+The CNN training process terminated through early stopping.
 
-These results illustrate a performance-versus-feature-engineering trade-off, but should be interpreted cautiously given the current record-level splitting strategy and unavailable run-level artifacts.
+- Best epoch: 7
+- Maximum epochs configured: 20
+- Best validation PR-AUC: approximately 0.5734
 
-## 7. Hardware Integration & Streaming Inference
+The best checkpoint was saved as `ecg_cnn_best.keras`.
 
-The project also includes an ESP32/ADS1293-connected ECG acquisition and inference prototype.
+### Classical model validation results
 
-### Components
+| Model | PCA | Accuracy | ROC-AUC | PR-AUC |
+|---|---|---:|---:|---:|
+| SVM | No | 0.5217 | 0.5205 | 0.2774 |
+| SVM | Yes | 0.5218 | 0.5205 | 0.2773 |
+| Random Forest | No | 0.5859 | 0.4891 | 0.1737 |
+| Random Forest | Yes | 0.5815 | 0.4592 | 0.1616 |
+| Logistic Regression | No | 0.6272 | 0.5771 | 0.4259 |
+| Logistic Regression | Yes | 0.6272 | 0.5771 | 0.4259 |
 
-- ADS1293: ECG acquisition front end.
-- ESP32: Microcontroller for ECG sample acquisition and serial transmission.
-- Python: Host-side signal processing and model inference.
+Logistic Regression achieved the highest validation PR-AUC among the classical model families. Its PCA and non-PCA configurations had identical reported metrics.
 
-### Streaming workflow
+### Final held-out test results
 
-1. ESP32 transmits ECG samples over serial.
-2. Python receives incoming samples.
-3. A rolling 360-sample window is maintained.
-4. Optional bandpass filtering is applied.
-5. The trained model generates an abnormality probability.
-6. A configurable threshold determines the displayed classification.
+The selected classical models and CNN were evaluated on the same held-out test partition.
 
-Example:
+| Model | Accuracy | Balanced Accuracy | Precision | Recall | Specificity | F1-score | ROC-AUC | PR-AUC | MCC |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Logistic Regression | 0.6614 | 0.5749 | 0.3006 | 0.4221 | 0.7278 | 0.3511 | **0.6888** | **0.5152** | 0.1342 |
+| Random Forest | **0.7752** | 0.6206 | **0.4757** | 0.3473 | **0.8939** | 0.4015 | 0.6738 | 0.4422 | **0.2723** |
+| CNN | 0.7443 | **0.6211** | 0.4095 | 0.4034 | 0.8388 | **0.4064** | 0.6773 | 0.4370 | 0.2435 |
+| SVM | 0.6582 | 0.5545 | 0.2818 | 0.3712 | 0.7377 | 0.3204 | 0.6485 | 0.3853 | 0.0994 |
 
-```bash
-python serial_infer.py --port COM5 --baud 115200 --threshold 0.5
-```
+### Interpretation and observations
 
-Optional arguments:
+The results reveal that no single model dominates every evaluation metric.
 
-- `--window`: Input window size (default 360).
-- `--hop`: Prediction stride (default 180).
-- `--no-filter`: Disable Python-side bandpass filtering.
+- **Logistic Regression** achieved the highest test ROC-AUC (0.6888), PR-AUC (0.5152), and recall (0.4221).
+- **Random Forest** achieved the highest accuracy (0.7752), precision (0.4757), specificity (0.8939), and Matthews correlation coefficient (0.2723).
+- **CNN** achieved the highest F1-score (0.4064) and balanced accuracy (0.6211), although its balanced accuracy was very close to Random Forest.
+- **SVM** had the weakest overall performance among the evaluated models.
 
-**Important limitation:** Training uses annotation-centred beat windows, whereas the serial inference implementation uses rolling windows from the incoming stream. These inputs are not necessarily aligned. The streaming prototype therefore demonstrates hardware-connected inference, not a fully validated real-time beat-detection system. Model inference currently runs in the Python host application rather than directly on the ESP32.
+The test-set abnormal-beat prevalence was approximately 21.7%. All four models achieved PR-AUC values above this prevalence baseline.
 
-## 8. Repository Structure
+An important observation is the difference between CNN validation and test performance. Its validation PR-AUC was approximately 0.5734, while its test PR-AUC was 0.4370. This indicates a generalization gap that warrants further investigation.
+
+The experiments demonstrate that a more complex neural network does not necessarily outperform simpler classifiers under a subject-wise evaluation setting.
+
+## Repository Structure
 
 ```text
 ecg-anomaly-detection/
 │
-├── README.md
+├── main_pipeline/
+│   ├── output/
+│   ├── prepare_data.py
+│   ├── train_cnn.py
+│   ├── train_classical_ml.py
+│   ├── compare_models.py
+│   ├── test_cnn.py
+│   ├── predict_realtime.py
+│   ├── alert_system.py
+│   ├── serial_infer.py
+│   ├── run_full_pipeline_output.py
+│   ├── sample_quick_test.py
+│   ├── requirements.txt
+│   ├── README.md
+│   └── .gitignore
 │
-└── main_pipeline/
-    ├── prepare_data.py
-    ├── train_cnn.py
-    ├── test_cnn.py
-    ├── train_classical_ml.py
-    ├── compare_models.py
-    ├── predict_realtime.py
-    ├── alert_system.py
-    ├── serial_infer.py
-    ├── sample_quick_test.py
-    ├── run_full_pipeline_output.py
-    ├── final_comparison.md
-    └── requirements.txt
+├── README.md
+└── .gitignore
 ```
 
-Generated datasets, trained models and run outputs are created during execution and are not represented as pre-existing downloadable artifacts in this repository structure.
+Generated datasets and trained model artifacts are not necessarily committed to the repository.
 
-## 9. Installation & Execution
+## Running the Project
 
-### Requirements
+### 1. Install dependencies
+
+```bash
+pip install -r main_pipeline/requirements.txt
+```
+
+### 2. Download the dataset
+
+Download the MIT-BIH Arrhythmia Database from [PhysioNet](https://physionet.org/content/mitdb/) and place its files in:
+
+```text
+main_pipeline/mitdb/
+```
+
+Alternatively, configure the `DATASET_PATH` environment variable to point to the dataset directory.
+
+### 3. Prepare the data
+
+```bash
+cd main_pipeline
+python prepare_data.py
+```
+
+This generates:
+
+```text
+X_train.npy
+y_train.npy
+X_val.npy
+y_val.npy
+X_test.npy
+y_test.npy
+norm_stats.npz
+```
+
+### 4. Train the CNN
+
+```bash
+python train_cnn.py
+```
+
+### 5. Train classical models
+
+```bash
+python train_classical_ml.py
+```
+
+### 6. Compare models
+
+```bash
+python compare_models.py
+```
+
+The final comparison is saved to:
+
+```text
+models/final_test_comparison.json
+```
+
+## Technologies Used
 
 - Python
 - NumPy
 - SciPy
 - WFDB
-- TensorFlow
-- Scikit-learn
+- TensorFlow / Keras
+- scikit-learn
 - Matplotlib
 - Joblib
-- PySerial
 
-Install dependencies:
+## Limitations and Future Work
 
-```bash
-cd main_pipeline
-pip install -r requirements.txt
-```
+The current implementation has several limitations:
 
-Download the MIT-BIH Arrhythmia Database from [PhysioNet](https://physionet.org/content/mitdb/1.0.0/) and extract it into a directory named `mitdb` alongside the `main_pipeline` folder, or configure `DATASET_PATH` to its location.
+1. **Class imbalance:** Normal beats are more frequent than abnormal beats. Class weighting is used in classical models, but further imbalance-handling strategies could be explored.
+2. **Feature engineering:** Classical models use only five handcrafted features. More informative morphological, temporal and frequency-domain features may improve performance.
+3. **Generalization:** The CNN exhibits a validation-to-test PR-AUC gap. Further investigation of subject variability, model capacity, regularization and split sensitivity is needed.
+4. **Subject-level evaluation:** The subject-wise split helps reduce beat-level leakage, but this experiment does not establish broad clinical generalization.
+5. **Binary classification:** Combining several abnormal beat categories into one class removes distinctions between arrhythmia types.
+6. **Threshold selection:** The current classification threshold is 0.5. Threshold optimization and probability calibration should be investigated using validation data.
+7. **Hardware deployment:** Real-time and embedded inference components should be considered prototype functionality until their end-to-end performance and reliability have been independently tested.
 
-### Run the complete pipeline
+Potential future improvements include:
 
-```bash
-python run_full_pipeline_output.py
-```
+- More extensive ECG morphological and temporal feature extraction.
+- Hyperparameter optimization using validation data.
+- Evaluation across multiple subject-wise splits.
+- Class-specific classification rather than binary grouping.
+- Calibration and threshold analysis.
+- Investigation of lightweight models for embedded ECG inference.
 
-The runner executes:
+## Disclaimer
 
-```text
-prepare_data.py
-      ↓
-train_cnn.py
-      ↓
-test_cnn.py
-      ↓
-train_classical_ml.py
-      ↓
-compare_models.py
-```
-
-It generates timestamped experiment logs, evaluation metrics and a model comparison report under `main_pipeline/output/`.
-
-### Run individual stages
-
-```bash
-python prepare_data.py
-python train_cnn.py
-python test_cnn.py
-python train_classical_ml.py
-python compare_models.py
-python alert_system.py
-```
-
-### Quick smoke test
-
-```bash
-python sample_quick_test.py
-```
-
-This uses synthetic data to check the pipeline components. It is not a substitute for evaluating the model on MIT-BIH.
-
-## 10. Limitations & Future Work
-
-The current implementation provides an experimental foundation, with several areas requiring further validation:
-
-- Subject-independent data partitioning with explicit subject grouping.
-- Reproducible experiment logs, sample counts and confusion matrices.
-- More comprehensive handling of class imbalance and annotation categories.
-- Clinically meaningful RR-interval and morphology-based feature extraction.
-- Alignment of streaming inputs with the beat-centred training representation.
-- Validation on external ECG datasets.
-- Repeated runs and statistical reporting to assess performance variability.
-
-This project is an educational and research prototype. It is not a clinically validated diagnostic or medical decision-support system.
-
-## 11. References
-
-1. Moody, G. B., & Mark, R. G. (2005). [MIT-BIH Arrhythmia Database](https://doi.org/10.13026/C2F305). PhysioNet.
-2. Moody, G. B., & Mark, R. G. (2001). [The impact of the MIT-BIH Arrhythmia Database](https://ecg.mit.edu/george/publications/mitdb-embs-2001.pdf). IEEE Engineering in Medicine and Biology Magazine, 20(3), 45–50.
-
----
-
-**Author:** Lakshya Arora  
-Integrated M.Sc. Mathematics + B.E. Electrical & Electronics Engineering  
-BITS Pilani, K.K. Birla Goa Campus
-
-[GitHub](https://github.com/la9fer) · [LinkedIn](https://www.linkedin.com/in/lakshya-arora-51100329a/)
+This project is intended for educational and research purposes. It is not a medical device, does not provide a diagnosis, and must not be used as a substitute for professional medical evaluation.
